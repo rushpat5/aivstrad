@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from collections import Counter
 import base64
 import matplotlib.pyplot as plt
+import re
 
 st.set_page_config(page_title="Search vs Assistant Visibility", layout="wide")
 
@@ -23,36 +24,21 @@ def extract_domain(url: str) -> str:
     except Exception:
         return url.lower()
 
-def parse_pasted_input(text: str) -> dict:
-    """Parses pasted text into {query: [urls]} mapping."""
+def parse_input(text: str) -> dict:
+    """Robust parser that supports google::, google:, or any variant on newlines."""
     mapping = {}
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        if "::" in line or "\t" in line or "|" in line:
-            sep = "::" if "::" in line else ("\t" if "\t" in line else "|")
-            parts = [p.strip() for p in line.split(sep, 1)]
-            if len(parts) == 2:
-                q, urls = parts
-                mapping[q.lower()] = [u.strip() for u in urls.split(",") if u.strip()]
-            i += 1
-        elif i + 1 < len(lines) and ("http" in lines[i + 1] or "," in lines[i + 1]):
-            q = line
-            urls = [u.strip() for u in lines[i + 1].split(",") if u.strip()]
-            mapping[q.lower()] = urls
-            i += 2
-        else:
-            mapping[line.lower()] = []
-            i += 1
+    pattern = r"(?im)^(google[:]*\s*.+?|.+?)\s*::\s*(.+)$"
+    for match in re.finditer(pattern, text):
+        key = match.group(1).strip().lower()
+        urls = [u.strip() for u in match.group(2).split(",") if u.strip()]
+        mapping[key] = urls
     return mapping
 
 def serpapi_search_top10(query: str, key: str):
     params = {"engine": "google", "q": query, "api_key": key, "num": 10}
-    resp = requests.get("https://serpapi.com/search.json", params=params, timeout=20)
-    data = resp.json()
-    results = [r.get("link") for r in data.get("organic_results", []) if r.get("link")]
-    return results[:10]
+    r = requests.get("https://serpapi.com/search.json", params=params, timeout=20)
+    data = r.json()
+    return [res.get("link") for res in data.get("organic_results", []) if res.get("link")][:10]
 
 def make_download_link(df, name):
     csv = df.to_csv(index=False)
@@ -60,67 +46,66 @@ def make_download_link(df, name):
     return f'<a href="data:file/csv;base64,{b64}" download="{name}">📥 Download {name}</a>'
 
 # ---------------------------------------------------------------------
-# UI Layout
+# UI
 # ---------------------------------------------------------------------
 st.title("Search vs Assistant Visibility Analyzer")
-st.caption("Compare how often your content appears in **Google Search** vs **AI Assistants** like ChatGPT Search or Perplexity.")
+st.caption("Measure how much AI assistant citations overlap with Google’s Top-10 results.")
 
 with st.sidebar:
     st.header("Setup")
-    mode = st.radio("Choose Input Mode", ["Manual", "Auto Google (SerpAPI)"], index=0)
+    mode = st.radio("Mode", ["Manual", "Auto Google (SerpAPI)"], index=0)
     serpapi_key = st.text_input("SerpAPI Key (optional)", type="password")
-    show_domains = st.checkbox("Show domain-level breakdown", value=True)
+    show_domains = st.checkbox("Show domain-level breakdown", True)
 
-st.markdown("""
-### Step 1. Enter Queries
-Type each search query on a new line.
-""")
+st.markdown("### Step 1 – Enter Queries (one per line)")
 queries_text = st.text_area("Queries", height=120)
 
 st.markdown("""
-### Step 2. Paste Assistant & Google Data
-Format examples:
+### Step 2 – Paste Assistant and Google Data  
+Each block uses a `::` separator between query and URLs.
+
+Examples:
+
 how to bake sourdough :: sourdoughguide.com, breadtalk.com, thefreshloaf.com
 google::how to bake sourdough :: thefreshloaf.com, kingarthurflour.com, seriouseats.com
 
-Lines starting with `google::` are treated as **Google Top-10** results.  
-Regular lines are **Assistant Citations**.
+All of these will be accepted:
+`google::query`, `google: query`, `google query`
 """)
 
-assistant_input = st.text_area("Paste combined data here", height=250)
+assistant_input = st.text_area("Paste your data here", height=250)
 
 # ---------------------------------------------------------------------
-# Main Logic
+# Core Logic
 # ---------------------------------------------------------------------
 if st.button("Run Analysis"):
     queries = [q.strip().lower() for q in queries_text.splitlines() if q.strip()]
-    mapping = parse_pasted_input(assistant_input)
-
+    mapping = parse_input(assistant_input)
     results, domain_counter = [], Counter()
 
     for q in queries:
-        # --- Flexible Google Top-10 lookup ---
+        # Find Google list
         google_urls = []
         if mode == "Auto Google (SerpAPI)" and serpapi_key:
             try:
                 google_urls = serpapi_search_top10(q, serpapi_key)
             except Exception as e:
-                st.error(f"Error fetching Google results for '{q}': {e}")
+                st.error(f"SerpAPI error for '{q}': {e}")
         else:
-            q_norm = q.replace(" ", "").lower()
-            for key, urls in mapping.items():
-                k = key.lower().replace(" ", "")
-                if k.startswith("google") and (q_norm in k or k.endswith(q_norm)):
+            q_norm = q.replace(" ", "")
+            for k, urls in mapping.items():
+                if k.startswith("google") and q_norm in k.replace(" ", ""):
                     google_urls = urls
                     break
 
-        # Assistant URLs
-        assistant_urls = mapping.get(q, [])
-        if not assistant_urls and q.lower() in mapping:
-            assistant_urls = mapping[q.lower()]
+        # Assistant list
+        assistant_urls = []
+        for k, urls in mapping.items():
+            if not k.startswith("google") and q in k:
+                assistant_urls = urls
+                break
 
-        google_set = set(google_urls)
-        assistant_set = set(assistant_urls)
+        google_set, assistant_set = set(google_urls), set(assistant_urls)
         I = len(google_set & assistant_set)
         N = max(0, len(assistant_set) - I)
         SVR = I / 10 if google_urls else 0
@@ -141,49 +126,49 @@ if st.button("Run Analysis"):
             "UAVR": round(UAVR, 3)
         })
 
-    results_df = pd.DataFrame(results)
+    df = pd.DataFrame(results)
 
-    # ---------------- Output ----------------
+    # -----------------------------------------------------------------
+    # Output
+    # -----------------------------------------------------------------
     st.success("✅ Analysis complete.")
     st.markdown("### Per-Query Metrics")
-    st.dataframe(results_df, use_container_width=True)
-    st.markdown(make_download_link(results_df, "visibility_report.csv"), unsafe_allow_html=True)
+    st.dataframe(df, use_container_width=True)
+    st.markdown(make_download_link(df, "visibility_report.csv"), unsafe_allow_html=True)
 
     if show_domains:
         st.markdown("### Domain Repeat Citations (RCC)")
-        num_queries = len(queries) or 1
-        rcc_df = pd.DataFrame([
-            {"Domain": d, "Citations": c, "RCC": round(c / num_queries, 3)}
-            for d, c in domain_counter.items()
-        ]).sort_values("RCC", ascending=False)
-        st.dataframe(rcc_df, use_container_width=True)
+        qn = len(queries) or 1
+        rcc = pd.DataFrame(
+            [{"Domain": d, "Citations": c, "RCC": round(c / qn, 3)} for d, c in domain_counter.items()]
+        ).sort_values("RCC", ascending=False)
+        st.dataframe(rcc, use_container_width=True)
 
     st.markdown("---")
-    st.markdown("## How to Read the Results")
+    st.markdown("## Reading the Results")
     st.markdown("""
-**Shared (I):** URLs appearing in both Google and assistant results.  
-**Unique (N):** URLs the assistant uses that Google didn’t rank.  
-**SVR (Shared Visibility Rate):** I ÷ 10 → overlap of Google’s Top-10 with assistant citations.  
-**UAVR (Unique Assistant Visibility Rate):** N ÷ assistant citations → how much new material the assistant adds.  
-**RCC (Repeat Citation Count):** How often a domain is repeatedly cited across queries.
+**Shared (I)** = URLs appearing in both systems  
+**Unique (N)** = Assistant-only URLs  
+**SVR** = I ÷ 10 → overlap strength  
+**UAVR** = N ÷ assistant citations → novelty fraction  
+**RCC** = domain citations ÷ queries → citation consistency  
 
 | Pattern | Meaning |
 |----------|----------|
-| SVR ≥ 0.6 | Strong overlap — assistants and Google trust the same sources. |
-| 0.3 ≤ SVR < 0.6 | Moderate overlap — improve clarity, linking, or schema. |
-| SVR < 0.3 with high UAVR | Assistant prefers other sources — review authority and structure. |
-| High RCC for competitors | Indicates strong semantic trust — analyze their design or markup. |
+| SVR ≥ 0.6 | High overlap – semantic and lexical agree |
+| 0.3 ≤ SVR < 0.6 | Partial alignment – improve clarity or linking |
+| SVR < 0.3 & high UAVR | Assistants prefer other sources |
+| High RCC | Competitors trusted repeatedly |
 """)
 
     st.markdown("### SVR Overview")
     fig, ax = plt.subplots()
-    ax.bar(results_df["Query"], results_df["SVR"], color="cornflowerblue")
+    ax.bar(df["Query"], df["SVR"], color="cornflowerblue")
     ax.set_ylabel("SVR (Shared Visibility Rate)")
-    ax.set_xlabel("Query")
     ax.set_ylim(0, 1)
-    for i, v in enumerate(results_df["SVR"]):
-        ax.text(i, v + 0.02, str(v), ha='center')
+    for i, v in enumerate(df["SVR"]):
+        ax.text(i, v + 0.02, str(v), ha="center")
     st.pyplot(fig)
 
 else:
-    st.info("Enter your queries and paste data above, then click **Run Analysis**.")
+    st.info("Enter queries and data above, then click **Run Analysis**.")
