@@ -25,7 +25,7 @@ def extract_domain(url: str) -> str:
         return url.lower()
 
 def parse_input(text: str) -> dict:
-    """Robust parser that supports google::, google:, or any variant on newlines."""
+    """Flexible parser supporting google::, google:, or multiline entries."""
     mapping = {}
     pattern = r"(?im)^(google[:]*\s*.+?|.+?)\s*::\s*(.+)$"
     for match in re.finditer(pattern, text):
@@ -45,9 +45,8 @@ def make_download_link(df, name):
     b64 = base64.b64encode(csv.encode()).decode()
     return f'<a href="data:file/csv;base64,{b64}" download="{name}">📥 Download {name}</a>'
 
-
 # ---------------------------------------------------------------------
-# TAB STRUCTURE
+# Tabs
 # ---------------------------------------------------------------------
 tab1, tab2 = st.tabs(["🔍 Run Analysis", "ℹ️ About & Explanation"])
 
@@ -56,7 +55,7 @@ tab1, tab2 = st.tabs(["🔍 Run Analysis", "ℹ️ About & Explanation"])
 # =====================================================================
 with tab1:
     st.title("Search vs Assistant Visibility Analyzer")
-    st.caption("Quantify how much your SEO visibility overlaps with AI assistant citations (ChatGPT Search, Perplexity, etc.)")
+    st.caption("Measure how much your Google SEO visibility carries into AI assistant citations like ChatGPT Search or Perplexity.")
 
     with st.sidebar:
         st.header("Setup")
@@ -69,15 +68,15 @@ with tab1:
 
     st.markdown("""
     ### Step 2 – Paste Assistant and Google Data  
-    Use `::` as a separator between query and URLs.
+    Use `::` to separate query names and URLs.
 
-    **Examples:**
+    **Example:**
     ```
-    how to bake sourdough :: sourdoughguide.com, breadtalk.com, thefreshloaf.com
-    google::how to bake sourdough :: thefreshloaf.com, kingarthurflour.com, seriouseats.com
+    vi prepaid plans :: myvi.in, airtel.in, jio.com
+    google::vi prepaid plans :: myvi.in, jio.com, airtel.in, paytm.com
     ```
 
-    Acceptable forms:  
+    Formats supported:  
     - `google::query`  
     - `google: query`  
     - `google query`
@@ -91,7 +90,7 @@ with tab1:
         results, domain_counter = [], Counter()
 
         for q in queries:
-            # Find Google list
+            # Get Google URLs
             google_urls = []
             if mode == "Auto Google (SerpAPI)" and serpapi_key:
                 try:
@@ -105,7 +104,7 @@ with tab1:
                         google_urls = urls
                         break
 
-            # Assistant list
+            # Assistant URLs
             assistant_urls = []
             for k, urls in mapping.items():
                 if not k.startswith("google") and q in k:
@@ -136,10 +135,49 @@ with tab1:
         df = pd.DataFrame(results)
 
         # -----------------------------------------------------------------
-        # Output
+        # Plain-English Summary
         # -----------------------------------------------------------------
         st.success("✅ Analysis complete.")
-        st.markdown("### Per-Query Metrics")
+        st.markdown("### Results Summary (Plain English)")
+
+        avg_svr = round(df["SVR"].mean(), 2)
+        avg_uavr = round(df["UAVR"].mean(), 2)
+        top_domains = (
+            pd.DataFrame(domain_counter.items(), columns=["Domain", "Count"])
+            .sort_values("Count", ascending=False)
+            .head(3)
+        )
+
+        if avg_svr >= 0.6:
+            strength = "🟩 Strong overlap — AI assistants and Google trust the same pages."
+            action = "Maintain clarity, factual tone, and structured data. You’re semantically aligned."
+        elif 0.3 <= avg_svr < 0.6:
+            strength = "🟨 Moderate overlap — assistants cite you but also show competitors."
+            action = "Tighten on-page clarity, headings, and schema markup to raise semantic trust."
+        else:
+            strength = "🟥 Low overlap — assistants prefer other domains."
+            action = "Study top-cited competitors. Improve structure, evidence blocks, and factual precision."
+
+        if avg_uavr >= 0.4:
+            novelty = "Assistants surface many new sources (high UAVR)."
+        else:
+            novelty = "Assistants mostly reuse Google’s top results (low UAVR)."
+
+        st.markdown(f"""
+        **Average SVR:** {avg_svr}  
+        **Average UAVR:** {avg_uavr}  
+        **Overall Assessment:** {strength}  
+        **Assistant Behavior:** {novelty}  
+        **Recommended Action:** {action}
+        """)
+
+        st.markdown("### Top Repeated Domains (High RCC = Trusted Sources)")
+        st.table(top_domains)
+
+        # -----------------------------------------------------------------
+        # Full Data Tables
+        # -----------------------------------------------------------------
+        st.markdown("### Per-Query Breakdown")
         st.dataframe(df, use_container_width=True)
         st.markdown(make_download_link(df, "visibility_report.csv"), unsafe_allow_html=True)
 
@@ -151,7 +189,10 @@ with tab1:
             ).sort_values("RCC", ascending=False)
             st.dataframe(rcc, use_container_width=True)
 
-        st.markdown("### SVR Overview")
+        # -----------------------------------------------------------------
+        # Chart Visualization
+        # -----------------------------------------------------------------
+        st.markdown("### SVR Overview (Overlap by Query)")
         fig, ax = plt.subplots()
         ax.bar(df["Query"], df["SVR"], color="cornflowerblue")
         ax.set_ylabel("SVR (Shared Visibility Rate)")
@@ -160,88 +201,88 @@ with tab1:
             ax.text(i, v + 0.02, str(v), ha="center")
         st.pyplot(fig)
 
+        # -----------------------------------------------------------------
+        # Contextual Explanation
+        # -----------------------------------------------------------------
+        st.markdown("---")
+        st.markdown("### Interpreting These Results")
+        st.markdown(f"""
+        - **SVR (Shared Visibility Rate)** → how much Google visibility carries into AI assistants.  
+          • 0.6+ = Strong alignment  
+          • 0.3–0.6 = Partial alignment  
+          • < 0.3 = AI not using your pages  
+
+        - **UAVR (Unique Assistant Visibility Rate)** → how many new sources assistants use.  
+          • High UAVR = assistants trust new sources (potential gaps).  
+          • Low UAVR = assistants echo Google (consistent trust).  
+
+        - **RCC (Repeat Citation Count)** → domains that repeatedly appear in AI citations.  
+          High RCC for competitors = they’re semantically trusted — study their structure and markup.  
+
+        **Action Plan Example (for Vi-type brands):**
+        1. Focus on pages with SVR < 0.3 and rework structure (short factual paragraphs, FAQs).  
+        2. Add structured data (FAQ, Product, HowTo) to recharge and plan pages.  
+        3. Monitor SVR monthly; rising SVR = better AI visibility.  
+        4. Track high-RCC competitors and analyze their formatting and metadata.
+        """)
+
 # =====================================================================
 # TAB 2 — ABOUT / EXPLANATION
 # =====================================================================
 with tab2:
-    st.title("About This Tool")
+    st.title("About & Explanation")
     st.markdown("""
 ### Purpose
-Traditional SEO metrics show what ranks in Google, but AI assistants like **ChatGPT Search**, **Perplexity**, and **Gemini** now act as new intermediaries.  
-They answer questions directly, summarizing from sources they trust — often before a user clicks.  
-This tool quantifies **how much of your search visibility carries into AI assistant visibility.**
+Traditional SEO reports stop at Google rankings.  
+AI assistants like **ChatGPT Search**, **Perplexity**, and **Gemini** now filter and summarize before the click — changing visibility itself.  
+This tool helps measure **semantic visibility** — how often your content is cited or trusted by AI.
 
 ---
 
-### How It Works
-1. **You provide:**
-   - Google’s Top-10 results for your query.
-   - AI assistant’s cited sources for the same query.
-2. **The tool compares them.**
-   - Finds overlap (shared URLs/domains).
-   - Finds unique assistant citations.
-   - Measures how often competitors appear across queries.
-
----
-
-### Metrics in Simple Terms
-| Metric | Definition | Why It Matters |
-|--------|-------------|----------------|
-| **Shared (I)** | Number of URLs appearing in both Google & AI lists. | Shows alignment between search and assistant. |
-| **Unique (N)** | Assistant-only citations. | Reveals new sources AI trusts. |
-| **SVR (Shared Visibility Rate)** | % of Google’s Top-10 also cited by AI. | Measures overlap strength. |
-| **UAVR (Unique Assistant Visibility Rate)** | % of assistant citations not in Google’s Top-10. | Measures novelty or divergence. |
-| **RCC (Repeat Citation Count)** | Domain consistency across multiple queries. | Identifies semantically trusted competitors. |
-
----
-
-### Interpreting Results
-| Pattern | Meaning | SEO Implication |
-|----------|----------|-----------------|
-| **SVR ≥ 0.6** | Strong overlap | Your content ranks well *and* is semantically trusted by AI. |
-| **0.3 ≤ SVR < 0.6** | Partial overlap | Improve clarity, structure, and schema markup. |
-| **SVR < 0.3 & UAVR high** | Divergence | Assistants trust other content types—analyze their formats. |
-| **High RCC** | Repeated domain trust | Indicates who LLMs “believe” most—study those sites. |
-
----
-
-### How SEOs Can Use This
-1. **Visibility Mapping:**  
-   Track how much of your Google visibility carries into AI discovery.
-
-2. **Competitor Discovery:**  
-   Identify domains repeatedly cited by assistants even if they rank lower in Google.
-
-3. **Content Optimization:**  
-   - Use **short, factual paragraphs (200–300 words)**.  
-   - Add **structured data** (`FAQ`, `HowTo`, `TechArticle`).  
-   - Keep **author and timestamp metadata** consistent.  
-   - Include canonical PDFs for credibility on factual content.
-
-4. **Reporting:**  
-   Present to management:  
-   *“Our SVR = 0.45 → roughly 45% of our SEO visibility extends into AI visibility.”*
+### What It Measures
+- **Overlap (SVR):** How often Google’s Top-10 results also appear in AI assistant citations.  
+- **Novelty (UAVR):** How many assistant sources are new or different.  
+- **Consistency (RCC):** How frequently domains appear across multiple queries.
 
 ---
 
 ### Why It Matters
-- **Search is now hybrid.**  
-  Google uses both lexical and semantic retrieval.  
-  AI assistants use semantic retrieval only.  
-  Measuring their intersection is essential to understanding how your brand is represented in AI-generated answers.
-
-- **This tool is your first diagnostic layer.**  
-  It shows *where you stand* between two worlds —  
-  **SEO rankings** and **AI-driven discovery**.
+| Challenge | Impact | Metric |
+|------------|---------|---------|
+| Google ranks pages by keyword match | Traditional visibility | SVR shows carryover into AI |
+| AI assistants summarize before clicks | Lost traffic measurement | UAVR shows new visibility gaps |
+| Competitors cited repeatedly | Semantic authority | RCC identifies trusted competitors |
 
 ---
 
-### Summary
-- SEO still drives measurable traffic.  
-- AI assistants shape *perception* and *trust*.  
-- This tool bridges that gap by turning invisible AI citations into quantifiable metrics.
+### How to Use This Practically
+1. Run your brand’s key queries (plans, features, FAQs).  
+2. Compare **SVR** — low values mean AI assistants aren’t surfacing your content.  
+3. Study **RCC** — repeated domains = trusted information sources.  
+4. Adjust structure and schema until overlap improves.
 
 ---
-**Author:** Built for marketers adapting to the post-SEO landscape.  
-**Goal:** Make AI visibility measurable, actionable, and trackable.
+
+### Quick Reference
+| Metric | Target | Interpretation |
+|--------|--------|----------------|
+| **SVR ≥ 0.6** | Strong alignment | Google + AI both trust your pages |
+| **0.3 ≤ SVR < 0.6** | Partial overlap | Improve clarity and linking |
+| **SVR < 0.3** | Low overlap | AI ignoring your pages |
+| **High RCC** | Consistent trust | You (or a competitor) are semantically authoritative |
+
+---
+
+### Example Application
+For **Vi (Vodafone Idea):**
+- SVR ≈ 0.45 → assistants cite Vi pages about half as often as Google does.  
+- RCC shows Airtel and Jio appear equally often → equal semantic trust.  
+- Recommended: tighten FAQ schema, make recharge pages more structured, maintain factual phrasing.
+
+---
+
+### Bottom Line
+- **SEO measures discoverability.**  
+- **This tool measures trust.**  
+It bridges traditional search visibility with emerging AI-driven discovery.
 """)
