@@ -8,7 +8,14 @@ import base64
 import matplotlib.pyplot as plt
 import re
 
-st.set_page_config(page_title="Search vs Assistant Visibility Analyzer", layout="wide")
+# ---------------------------------------------------------------------
+# Page Setup
+# ---------------------------------------------------------------------
+st.set_page_config(
+    page_title="Search vs AI Visibility Analyzer",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # ---------------------------------------------------------------------
 # Helper Functions
@@ -16,16 +23,13 @@ st.set_page_config(page_title="Search vs Assistant Visibility Analyzer", layout=
 def extract_domain(url: str) -> str:
     try:
         parsed = urlparse(url)
-        if parsed.netloc:
-            ext = tldextract.extract(url)
-            domain = f"{ext.domain}.{ext.suffix}" if ext.suffix else ext.domain
-            return domain.lower()
-        return url.lower()
+        ext = tldextract.extract(url)
+        domain = f"{ext.domain}.{ext.suffix}" if ext.suffix else ext.domain
+        return domain.lower()
     except Exception:
         return url.lower()
 
 def parse_input(text: str) -> dict:
-    """Flexible parser supporting google::, google:, or multiline entries."""
     mapping = {}
     pattern = r"(?im)^(google[:]*\s*.+?|.+?)\s*::\s*(.+)$"
     for match in re.finditer(pattern, text):
@@ -46,7 +50,7 @@ def make_download_link(df, name):
     return f'<a href="data:file/csv;base64,{b64}" download="{name}">📥 Download {name}</a>'
 
 # ---------------------------------------------------------------------
-# Tabs
+# Layout Tabs
 # ---------------------------------------------------------------------
 tab1, tab2 = st.tabs(["🔍 Run Analysis", "ℹ️ About & Explanation"])
 
@@ -54,43 +58,44 @@ tab1, tab2 = st.tabs(["🔍 Run Analysis", "ℹ️ About & Explanation"])
 # TAB 1 — MAIN TOOL
 # =====================================================================
 with tab1:
-    st.title("Search vs Assistant Visibility Analyzer")
-    st.caption("Measure how much your Google SEO visibility carries into AI assistant citations like ChatGPT Search or Perplexity.")
+    st.title("Search vs AI Visibility Analyzer")
+    st.caption("Quantify how much your Google SEO visibility carries into AI assistant citations (ChatGPT, Perplexity, etc.)")
 
     with st.sidebar:
         st.header("Setup")
         mode = st.radio("Mode", ["Manual", "Auto Google (SerpAPI)"], index=0)
         serpapi_key = st.text_input("SerpAPI Key (optional)", type="password")
+        brand_domain = st.text_input("Your Brand Domain (e.g., myvi.in)").strip().lower()
         show_domains = st.checkbox("Show domain-level breakdown", True)
 
-    st.markdown("### Step 1 – Enter Queries (one per line)")
-    queries_text = st.text_area("Queries", height=120)
+    # -----------------------------------------------------------------
+    # Input Section
+    # -----------------------------------------------------------------
+    st.markdown("### Step 1 — Enter Queries")
+    queries_text = st.text_area("One query per line", height=100)
 
     st.markdown("""
-    ### Step 2 – Paste Assistant and Google Data  
-    Use `::` to separate query names and URLs.
+    ### Step 2 — Paste Assistant & Google Data  
+    Use `::` to separate query and URLs.
 
-    **Example:**
+    **Example format:**
     ```
-    vi prepaid plans :: myvi.in, airtel.in, jio.com
+    vi prepaid plans :: myvi.in, airtel.in, jio.com  
     google::vi prepaid plans :: myvi.in, jio.com, airtel.in, paytm.com
     ```
-
-    Formats supported:  
-    - `google::query`  
-    - `google: query`  
-    - `google query`
     """)
 
-    assistant_input = st.text_area("Paste your data here", height=250)
+    assistant_input = st.text_area("Paste your data here", height=200)
 
+    # -----------------------------------------------------------------
+    # Run Analysis
+    # -----------------------------------------------------------------
     if st.button("Run Analysis"):
         queries = [q.strip().lower() for q in queries_text.splitlines() if q.strip()]
         mapping = parse_input(assistant_input)
         results, domain_counter = [], Counter()
 
         for q in queries:
-            # Get Google URLs
             google_urls = []
             if mode == "Auto Google (SerpAPI)" and serpapi_key:
                 try:
@@ -104,7 +109,6 @@ with tab1:
                         google_urls = urls
                         break
 
-            # Assistant URLs
             assistant_urls = []
             for k, urls in mapping.items():
                 if not k.startswith("google") and q in k:
@@ -135,54 +139,86 @@ with tab1:
         df = pd.DataFrame(results)
 
         # -----------------------------------------------------------------
-        # Plain-English Summary
+        # Smart Summary
         # -----------------------------------------------------------------
         st.success("✅ Analysis complete.")
-        st.markdown("### Results Summary (Plain English)")
+        st.markdown("## 🔎 Executive Summary")
 
         avg_svr = round(df["SVR"].mean(), 2)
         avg_uavr = round(df["UAVR"].mean(), 2)
         top_domains = (
             pd.DataFrame(domain_counter.items(), columns=["Domain", "Count"])
             .sort_values("Count", ascending=False)
-            .head(3)
+            .head(5)
         )
 
+        # Brand Analysis
+        brand_mentions = 0
+        competitor_domains = []
+        if brand_domain:
+            brand_mentions = domain_counter.get(brand_domain, 0)
+            competitor_domains = [d for d in top_domains["Domain"] if d != brand_domain]
+
+        # Strength Classification
         if avg_svr >= 0.6:
-            strength = "🟩 Strong overlap — AI assistants and Google trust the same pages."
-            action = "Maintain clarity, factual tone, and structured data. You’re semantically aligned."
+            summary_label = "🟩 Strong Overlap"
+            explanation = "AI assistants and Google trust the same content sources."
+            recommendation = "Maintain structure and authoritative tone. You’re well aligned semantically."
         elif 0.3 <= avg_svr < 0.6:
-            strength = "🟨 Moderate overlap — assistants cite you but also show competitors."
-            action = "Tighten on-page clarity, headings, and schema markup to raise semantic trust."
+            summary_label = "🟨 Moderate Overlap"
+            explanation = "AI assistants cite your pages but also rely on competitors."
+            recommendation = "Clarify headings, tighten schema markup, and simplify factual blocks."
         else:
-            strength = "🟥 Low overlap — assistants prefer other domains."
-            action = "Study top-cited competitors. Improve structure, evidence blocks, and factual precision."
+            summary_label = "🟥 Low Overlap"
+            explanation = "AI assistants prefer other domains over yours."
+            recommendation = "Review competitor structure and improve factual precision and clarity."
 
-        if avg_uavr >= 0.4:
-            novelty = "Assistants surface many new sources (high UAVR)."
+        # Novelty Message
+        novelty = "high" if avg_uavr >= 0.4 else "low"
+        novelty_text = (
+            "Assistants surface many new sources — possible content gaps."
+            if novelty == "high"
+            else "Assistants mostly reuse Google results — consistent trust base."
+        )
+
+        # Brand Statement
+        if brand_domain:
+            if brand_mentions == 0:
+                brand_text = f"🟥 Your domain `{brand_domain}` did **not** appear in any AI citations — no semantic presence detected."
+            elif brand_mentions <= len(df) // 2:
+                brand_text = f"🟨 Your domain `{brand_domain}` appeared {brand_mentions} times — partial recognition across AI results."
+            else:
+                brand_text = f"🟩 Your domain `{brand_domain}` appeared {brand_mentions} times — strong recurring AI trust."
         else:
-            novelty = "Assistants mostly reuse Google’s top results (low UAVR)."
+            brand_text = "_(Enter your brand domain in the sidebar for tailored analysis.)_"
 
+        # Narrative Summary
         st.markdown(f"""
+        **Overall Score:** {summary_label}  
         **Average SVR:** {avg_svr}  
         **Average UAVR:** {avg_uavr}  
-        **Overall Assessment:** {strength}  
-        **Assistant Behavior:** {novelty}  
-        **Recommended Action:** {action}
+        **Interpretation:** {explanation}  
+        **Assistant Behavior:** {novelty_text}  
+        **Recommendation:** {recommendation}  
+        ---
+        {brand_text}
         """)
 
-        st.markdown("### Top Repeated Domains (High RCC = Trusted Sources)")
-        st.table(top_domains)
+        # Competitor Info
+        if competitor_domains:
+            st.markdown("### ⚔️ Top Competing Domains in AI Citations")
+            for d in competitor_domains:
+                st.write(f"- {d}")
 
         # -----------------------------------------------------------------
-        # Full Data Tables
+        # Data + Visuals
         # -----------------------------------------------------------------
-        st.markdown("### Per-Query Breakdown")
+        st.markdown("### 📊 Per-Query Breakdown")
         st.dataframe(df, use_container_width=True)
         st.markdown(make_download_link(df, "visibility_report.csv"), unsafe_allow_html=True)
 
         if show_domains:
-            st.markdown("### Domain Repeat Citations (RCC)")
+            st.markdown("### 🌐 Domain Repeat Citations (RCC)")
             qn = len(queries) or 1
             rcc = pd.DataFrame(
                 [{"Domain": d, "Citations": c, "RCC": round(c / qn, 3)} for d, c in domain_counter.items()]
@@ -190,99 +226,78 @@ with tab1:
             st.dataframe(rcc, use_container_width=True)
 
         # -----------------------------------------------------------------
-        # Chart Visualization
+        # Improved Graph Handling Long Queries
         # -----------------------------------------------------------------
-        st.markdown("### SVR Overview (Overlap by Query)")
-        fig, ax = plt.subplots()
-        ax.bar(df["Query"], df["SVR"], color="cornflowerblue")
-        ax.set_ylabel("SVR (Shared Visibility Rate)")
+        st.markdown("### 📈 SVR (Shared Visibility Rate) per Query")
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.bar(range(len(df)), df["SVR"], color="cornflowerblue")
+        ax.set_ylabel("SVR (Overlap Score)")
         ax.set_ylim(0, 1)
+        ax.set_xticks(range(len(df)))
+        ax.set_xticklabels(df["Query"], rotation=35, ha="right", fontsize=9, wrap=True)
         for i, v in enumerate(df["SVR"]):
-            ax.text(i, v + 0.02, str(v), ha="center")
+            ax.text(i, v + 0.02, str(v), ha="center", fontsize=8)
+        plt.tight_layout()
         st.pyplot(fig)
 
         # -----------------------------------------------------------------
-        # Contextual Explanation
+        # Clear Closing Guidance
         # -----------------------------------------------------------------
         st.markdown("---")
-        st.markdown("### Interpreting These Results")
+        st.markdown("### 🧭 How to Act on This Data")
         st.markdown(f"""
-        - **SVR (Shared Visibility Rate)** → how much Google visibility carries into AI assistants.  
-          • 0.6+ = Strong alignment  
-          • 0.3–0.6 = Partial alignment  
-          • < 0.3 = AI not using your pages  
-
-        - **UAVR (Unique Assistant Visibility Rate)** → how many new sources assistants use.  
-          • High UAVR = assistants trust new sources (potential gaps).  
-          • Low UAVR = assistants echo Google (consistent trust).  
-
-        - **RCC (Repeat Citation Count)** → domains that repeatedly appear in AI citations.  
-          High RCC for competitors = they’re semantically trusted — study their structure and markup.  
-
-        **Action Plan Example (for Vi-type brands):**
-        1. Focus on pages with SVR < 0.3 and rework structure (short factual paragraphs, FAQs).  
-        2. Add structured data (FAQ, Product, HowTo) to recharge and plan pages.  
-        3. Monitor SVR monthly; rising SVR = better AI visibility.  
-        4. Track high-RCC competitors and analyze their formatting and metadata.
+        - **SVR < 0.3:** Rewrite those pages — improve factual tone, internal linking, and structure.  
+        - **SVR 0.3–0.6:** Align terminology, headings, and schema with how AI systems describe your topic.  
+        - **SVR > 0.6:** Keep content stable; you’re semantically strong.  
+        - **High RCC competitors:** Analyze their markup (schema.org, FAQ use) and page layout.  
+        - **Goal:** Raise your average SVR toward 0.6+ while keeping low UAVR.
         """)
 
 # =====================================================================
-# TAB 2 — ABOUT / EXPLANATION
+# TAB 2 — ABOUT & EXPLANATION
 # =====================================================================
 with tab2:
-    st.title("About & Explanation")
+    st.title("About This Tool")
     st.markdown("""
 ### Purpose
-Traditional SEO reports stop at Google rankings.  
-AI assistants like **ChatGPT Search**, **Perplexity**, and **Gemini** now filter and summarize before the click — changing visibility itself.  
-This tool helps measure **semantic visibility** — how often your content is cited or trusted by AI.
+Search engines and AI assistants retrieve information differently.  
+Search ranks pages **after** the answer is known.  
+AI assistants retrieve and synthesize **before** any click.  
+
+This tool measures **semantic visibility** — how much your SEO presence transfers into AI trust.
 
 ---
 
-### What It Measures
-- **Overlap (SVR):** How often Google’s Top-10 results also appear in AI assistant citations.  
-- **Novelty (UAVR):** How many assistant sources are new or different.  
-- **Consistency (RCC):** How frequently domains appear across multiple queries.
+### Key Metrics
+| Metric | What It Means | Good Range |
+|--------|----------------|-------------|
+| **SVR (Shared Visibility Rate)** | % of Google Top 10 also cited by AI | > 0.6 = strong |
+| **UAVR (Unique Assistant Visibility Rate)** | % of assistant-only citations | < 0.4 preferred |
+| **RCC (Repeat Citation Count)** | How often domains recur across queries | High = trusted |
 
 ---
 
-### Why It Matters
-| Challenge | Impact | Metric |
-|------------|---------|---------|
-| Google ranks pages by keyword match | Traditional visibility | SVR shows carryover into AI |
-| AI assistants summarize before clicks | Lost traffic measurement | UAVR shows new visibility gaps |
-| Competitors cited repeatedly | Semantic authority | RCC identifies trusted competitors |
+### How to Apply
+1. Choose your **brand domain** and key search queries.  
+2. Run analysis using Google + AI citations.  
+3. Check your **SVR** and **RCC** trends over time.  
+4. Benchmark competitors’ RCC — their content is semantically favored.  
+5. Optimize structure and schema on pages with low SVR.
 
 ---
 
-### How to Use This Practically
-1. Run your brand’s key queries (plans, features, FAQs).  
-2. Compare **SVR** — low values mean AI assistants aren’t surfacing your content.  
-3. Study **RCC** — repeated domains = trusted information sources.  
-4. Adjust structure and schema until overlap improves.
-
----
-
-### Quick Reference
-| Metric | Target | Interpretation |
-|--------|--------|----------------|
-| **SVR ≥ 0.6** | Strong alignment | Google + AI both trust your pages |
-| **0.3 ≤ SVR < 0.6** | Partial overlap | Improve clarity and linking |
-| **SVR < 0.3** | Low overlap | AI ignoring your pages |
-| **High RCC** | Consistent trust | You (or a competitor) are semantically authoritative |
-
----
-
-### Example Application
-For **Vi (Vodafone Idea):**
-- SVR ≈ 0.45 → assistants cite Vi pages about half as often as Google does.  
-- RCC shows Airtel and Jio appear equally often → equal semantic trust.  
-- Recommended: tighten FAQ schema, make recharge pages more structured, maintain factual phrasing.
+### What High vs Low SVR Means
+| SVR Range | Interpretation | Recommended Focus |
+|------------|----------------|-------------------|
+| ≥ 0.6 | AI and Search agree — you’re semantically strong. | Maintain clarity & structure |
+| 0.3–0.6 | Mixed trust — some overlap, some gaps. | Improve content markup |
+| < 0.3 | AI assistants ignore your site. | Fix structure, strengthen authority |
 
 ---
 
 ### Bottom Line
-- **SEO measures discoverability.**  
-- **This tool measures trust.**  
-It bridges traditional search visibility with emerging AI-driven discovery.
+**SEO measures visibility.**  
+**This tool measures trust.**  
+Your goal: make your content equally discoverable by both Google and AI.
 """)
