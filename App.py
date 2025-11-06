@@ -8,7 +8,7 @@ import base64
 import matplotlib.pyplot as plt
 import re
 
-st.set_page_config(page_title="Search vs Assistant Visibility", layout="wide")
+st.set_page_config(page_title="Search vs Assistant Visibility Analyzer", layout="wide")
 
 # ---------------------------------------------------------------------
 # Helper Functions
@@ -49,7 +49,7 @@ def make_download_link(df, name):
 # UI
 # ---------------------------------------------------------------------
 st.title("Search vs Assistant Visibility Analyzer")
-st.caption("Measure how much AI assistant citations overlap with Google’s Top-10 results.")
+st.caption("Quantify how much your existing SEO visibility overlaps with AI assistant citations like ChatGPT Search or Perplexity.")
 
 with st.sidebar:
     st.header("Setup")
@@ -62,15 +62,16 @@ queries_text = st.text_area("Queries", height=120)
 
 st.markdown("""
 ### Step 2 – Paste Assistant and Google Data  
-Each block uses a `::` separator between query and URLs.
+Each block uses a `::` separator between the query and URLs.
 
-Examples:
-
+**Examples:**
 how to bake sourdough :: sourdoughguide.com, breadtalk.com, thefreshloaf.com
 google::how to bake sourdough :: thefreshloaf.com, kingarthurflour.com, seriouseats.com
 
-All of these will be accepted:
-`google::query`, `google: query`, `google query`
+Acceptable forms include:
+- `google::query`
+- `google: query`
+- `google query`
 """)
 
 assistant_input = st.text_area("Paste your data here", height=250)
@@ -147,11 +148,11 @@ if st.button("Run Analysis"):
     st.markdown("---")
     st.markdown("## Reading the Results")
     st.markdown("""
-**Shared (I)** = URLs appearing in both systems  
-**Unique (N)** = Assistant-only URLs  
-**SVR** = I ÷ 10 → overlap strength  
-**UAVR** = N ÷ assistant citations → novelty fraction  
-**RCC** = domain citations ÷ queries → citation consistency  
+**Shared (I):** URLs appearing in both Google and assistant results  
+**Unique (N):** URLs the assistant uses that Google didn’t rank  
+**SVR (Shared Visibility Rate):** I ÷ 10 → overlap strength  
+**UAVR (Unique Assistant Visibility Rate):** N ÷ assistant citations → novelty fraction  
+**RCC (Repeat Citation Count):** Domain citations ÷ queries → citation consistency  
 
 | Pattern | Meaning |
 |----------|----------|
@@ -169,6 +170,81 @@ if st.button("Run Analysis"):
     for i, v in enumerate(df["SVR"]):
         ax.text(i, v + 0.02, str(v), ha="center")
     st.pyplot(fig)
+
+    # -----------------------------------------------------------------
+    # Detailed Educational Explanation
+    # -----------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("## Understanding This Tool (for Non-Technical SEOs)")
+    st.markdown("""
+### 1. The Challenge
+AI assistants like **ChatGPT Search**, **Perplexity**, and others are changing SEO.  
+They answer questions directly — often before a user clicks — and cite only a handful of trusted sources.  
+
+Marketers can’t see how often their content appears there.  
+This tool shows **how much of your existing SEO visibility carries into AI assistant visibility**.
+
+---
+
+### 2. What the Tool Actually Does
+For each query you provide, it compares:
+- **Google’s Top-10 URLs** (classic keyword-based ranking)
+- **Assistant citations** (sources the AI assistant used)
+
+It then measures:
+- How often the same pages appear in both lists (**Shared Visibility**)
+- How many assistant sources are unique (**Novelty**)
+- Which domains are cited repeatedly (**Consistency**)
+
+This helps you see whether your SEO strategy aligns with how AI assistants retrieve and trust information.
+
+---
+
+### 3. The Core Metrics Explained Simply
+| Metric | Plain Definition | Why It Matters |
+|--------|------------------|----------------|
+| **SVR (Shared Visibility Rate)** | Portion of Google’s top results that also appear in the assistant’s citations. | Shows how well your content “transfers” from search to AI assistants. |
+| **UAVR (Unique Assistant Visibility Rate)** | Portion of assistant sources that Google didn’t include. | Reveals new or alternative sources assistants prefer. |
+| **RCC (Repeat Citation Count)** | How often a domain is cited across multiple queries. | Indicates which sites have earned the model’s trust. |
+
+---
+
+### 4. How to Interpret Your Results
+| Scenario | Meaning | What To Do |
+|-----------|----------|------------|
+| **SVR ≥ 0.6** | Strong overlap. Your content is understood by both Google and AI. | Keep structure clean; maintain authority and clarity. |
+| **0.3 ≤ SVR < 0.6** | Partial overlap. AI recognizes you, but not as often. | Improve on-page clarity, headings, and schema markup. |
+| **SVR < 0.3 with High UAVR** | Assistants trust other sources. | Study high-RCC competitors and their content style. |
+| **High RCC for Competitors** | They are repeatedly cited by assistants. | Learn from their formatting, factual clarity, and structured data. |
+
+---
+
+### 5. How to Apply This in Real SEO Work
+**1. Monitor Overlap:**  
+Track your SVR across queries monthly. If it drops, AI visibility is slipping.  
+
+**2. Identify Semantic Leaders:**  
+High-RCC competitor domains show who the AI consistently trusts.  
+Audit those sites for structure and schema.  
+
+**3. Improve Semantic Clarity:**  
+Use headings, bullet lists, and schema (`FAQ`, `HowTo`, `TechArticle`) to make pages machine-readable.  
+
+**4. Bridge the Visibility Gap:**  
+If Google ranks you high but assistants ignore you, focus on factual precision, authorship fields, and clean structure.  
+
+**5. Report to Management:**  
+Turn “AI Visibility” into a metric.  
+Example: *Our SVR is 0.45 → about 45% of our Google visibility carries into AI assistant discovery.*
+
+---
+
+### 6. The Takeaway
+- **Old SEO:** Optimized for clicks and ranks.  
+- **New SEO:** Must also optimize for *citations and semantic trust*.  
+
+This tool helps you measure that invisible layer — **where your content stands in the AI discovery ecosystem**.
+""")
 
 else:
     st.info("Enter queries and data above, then click **Run Analysis**.")
