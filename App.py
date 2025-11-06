@@ -2,16 +2,15 @@
 import streamlit as st
 import pandas as pd
 import tldextract
-from urllib.parse import urlparse
 from collections import Counter
 import base64
-import matplotlib.pyplot as plt
 import re
-import io
+import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Search vs AI Visibility — Client Report", layout="wide")
+# ---------- APP CONFIG ----------
+st.set_page_config(page_title="Search vs AI Visibility Report", layout="wide")
 
-# ---------- Helpers ----------
+# ---------- HELPERS ----------
 def extract_domain(url: str) -> str:
     try:
         ext = tldextract.extract(url)
@@ -21,9 +20,9 @@ def extract_domain(url: str) -> str:
         return url.lower()
 
 def parse_input(text: str) -> dict:
-    """Parse lines like 'key :: url1, url2' robustly."""
+    """Parse lines like 'google::query :: url1, url2' or 'assistant::query :: url1, url2'."""
     mapping = {}
-    pattern = r"(?im)^(google[:]*\s*.+?|.+?)\s*::\s*(.+)$"
+    pattern = r"(?im)^(.*?::.*?)\s*::\s*(.+)$"
     for match in re.finditer(pattern, text):
         key = match.group(1).strip().lower()
         urls = [u.strip() for u in match.group(2).split(",") if u.strip()]
@@ -33,241 +32,181 @@ def parse_input(text: str) -> dict:
 def make_csv_download(df, name="report.csv"):
     csv = df.to_csv(index=False)
     b64 = base64.b64encode(csv.encode()).decode()
-    return f'<a href="data:file/csv;base64,{b64}" download="{name}">Download CSV</a>'
+    return f'<a href="data:file/csv;base64,{b64}" download="{name}">📥 Download CSV</a>'
 
 def make_text_download(text_str, name="client_report.txt"):
     b = text_str.encode()
     b64 = base64.b64encode(b).decode()
-    return f'<a href="data:file/txt;base64,{b64}" download="{name}">Download client report (TXT)</a>'
+    return f'<a href="data:file/txt;base64,{b64}" download="{name}">📄 Download Text Report</a>'
 
-def one_line_action(svr, uavr, brand_mentions):
-    if svr >= 0.6:
-        status = "Strong overlap. Search and AI agree."
-        immediate = "Maintain content structure and schema. Monitor monthly."
-    elif svr >= 0.3:
-        status = "Moderate overlap. AI cites your site sometimes."
-        immediate = "Improve headings, add short factual blocks, add schema."
+def summarize_results(avg_svr, avg_uavr, brand_mentions):
+    if avg_svr >= 0.6:
+        status = "🟩 Strong Overlap"
+        interp = "AI assistants and Google trust the same content sources."
+        action = "Maintain current clarity and authority. Keep updating structured data."
+    elif avg_svr >= 0.3:
+        status = "🟧 Moderate Overlap"
+        interp = "Assistants cite your brand but also show competitors."
+        action = "Add clearer markup, stronger linking, and FAQs to boost semantic trust."
     else:
-        status = "Low overlap. AI prefers other sources."
-        immediate = "Create clear explainers and FAQ-style content; add schema and canonical PDFs."
-    # UAVR nuance
-    if uavr >= 0.4:
-        novelty = "AI is surfacing many new sources — address content gaps with educational pages."
+        status = "🟥 Low Overlap"
+        interp = "Assistants prefer competitor sources more often than Google does."
+        action = "Rebuild clarity, fix schema, and publish short, factual explainers."
+
+    if avg_uavr >= 0.4:
+        novelty = "Assistants are showing many unique sources — AI is finding new trusted domains."
     else:
-        novelty = "AI largely follows Google — focus on clarity and trust signals."
-    # Brand nuance
+        novelty = "Assistants mostly reuse Google’s trusted set — stability is high."
+
     if brand_mentions == 0:
-        brand_text = "Your domain did not appear in AI citations."
+        brand_text = "Your domain does not appear in AI citations — low AI trust."
     elif brand_mentions == 1:
-        brand_text = "Your domain appeared once in AI citations."
+        brand_text = "Your domain appeared once in AI citations — limited but visible."
     else:
-        brand_text = f"Your domain appeared {brand_mentions} times in AI citations."
-    return status, immediate, novelty, brand_text
+        brand_text = f"Your domain appeared {brand_mentions} times in AI citations — strong recurring AI trust."
 
-def build_client_report_text(query_list, df, domain_counter, brand_domain):
-    lines = []
-    avg_svr = round(df["SVR"].mean(), 2) if not df.empty else 0
-    avg_uavr = round(df["UAVR"].mean(), 2) if not df.empty else 0
-    brand_mentions = domain_counter.get(brand_domain, 0) if brand_domain else 0
-    status, immediate, novelty, brand_text = one_line_action(avg_svr, avg_uavr, brand_mentions)
-
-    lines.append("Executive summary")
-    lines.append(f"Overall status: {status}")
-    lines.append(f"Average SVR (overlap): {avg_svr}")
-    lines.append(f"Average UAVR (assistant-unique share): {avg_uavr}")
-    lines.append(f"Immediate recommendation: {immediate}")
-    lines.append(f"Assistant behavior: {novelty}")
-    lines.append(brand_text)
-    lines.append("")
-    lines.append("Top repeating domains (by assistant citations):")
-    for d, c in domain_counter.most_common(8):
-        lines.append(f"- {d} : {c} citations")
-    lines.append("")
-    lines.append("Per-query actionable notes:")
-    for _, row in df.iterrows():
-        q = row["Query"]
-        svr = row["SVR"]
-        uavr = row["UAVR"]
-        shared = row["Shared (I)"]
-        unique = row["Unique (N)"]
-        note = ""
-        if svr >= 0.6:
-            note = "Good overlap. Keep this page format and schema."
-        elif svr >= 0.3:
-            note = "Partial overlap. Add a short 'claim + evidence' section and FAQ schema."
-        else:
-            note = "Low overlap. Create a concise explainer (200-300 words), add structured data, and ensure canonical URL."
-        if uavr >= 0.4:
-            note += " Assistants are citing alternative sources — add factual anchors and references."
-        lines.append(f"- {q} : SVR={svr}, Shared={shared}, Unique={unique}. Action: {note}")
-    lines.append("")
-    lines.append("Priority action list (ordered):")
-    lines.append("1) Create one short factual explainer per low-SVR query (200-300 words).")
-    lines.append("2) Add FAQ/HowTo/Product schema to those pages.")
-    lines.append("3) Stabilize canonical URLs and author/timestamp metadata.")
-    lines.append("4) Produce a single PDF authority guide for the topic and publish it on the site.")
-    lines.append("5) Re-run this analysis monthly and track SVR trend; target average SVR >= 0.6.")
-    return "\n".join(lines)
+    return status, interp, novelty, action, brand_text
 
 # ---------- UI ----------
-st.title("Search vs AI Visibility — Client-friendly Report")
-st.write("Paste your queries, Google top results (manual or via SerpAPI), and assistant citations. The app will generate a clear, prioritized client report.")
+st.title("🔍 Search vs AI Visibility Report")
+st.caption("Compare Google’s top results with AI assistant citations (ChatGPT, Perplexity, etc.).")
 
 with st.sidebar:
-    st.header("Inputs")
-    brand_domain = st.text_input("Brand domain (for branded insights, e.g., myvi.in)", "")
-    mode = st.selectbox("Mode", ["Manual"], index=0)
-    st.markdown("Data format (paste in the main page):")
-    st.markdown("`query :: url1, url2, url3` and `google::query :: url1, url2` and `assistant::query :: url1, url2`")
+    st.header("Setup")
+    brand_domain = st.text_input("Brand domain (for highlight, e.g., myvi.in)", "")
+    st.markdown("**Paste Data Format:**")
+    st.code("google::fancy mobile number :: url1, url2, ...\nassistant::fancy mobile number :: urlA, urlB, ...", language="text")
 
-st.markdown("### 1) Queries (one per line)")
-queries_text = st.text_area("", height=80, placeholder="fancy mobile number")
+st.markdown("### Step 1. Enter Query")
+queries_text = st.text_area("Queries (one per line)", "fancy mobile number", height=80)
 
-st.markdown("### 2) Paste Google + Assistant data (use :: separator)")
-data_input = st.text_area("", height=240, placeholder="fancy mobile number :: site1, site2\ngoogle::fancy mobile number :: site1, site2\nassistant::fancy mobile number :: siteA, siteB")
+st.markdown("### Step 2. Paste Combined Data")
+data_input = st.text_area("Paste Google and Assistant citation data below", height=300)
 
-if st.button("Generate client report"):
+if st.button("Run Analysis"):
     queries = [q.strip().lower() for q in queries_text.splitlines() if q.strip()]
-    if not queries:
-        st.error("Enter at least one query in the Queries box.")
-    else:
-        mapping = parse_input(data_input)
-        results = []
-        domain_counter = Counter()
+    mapping = parse_input(data_input)
+    results = []
+    domain_counter = Counter()
 
-        for q in queries:
-            # Google list
-            google_urls = []
-            q_norm = q.replace(" ", "")
-            for k, urls in mapping.items():
-                if k.startswith("google") and q_norm in k.replace(" ", ""):
-                    google_urls = urls
-                    break
-            # Assistant list
-            assistant_urls = []
-            for k, urls in mapping.items():
-                if k.startswith("assistant") and q in k:
-                    assistant_urls = urls
-                    break
-            # fallback: keys without 'assistant' or 'google' that match query
-            if not google_urls:
-                for k, urls in mapping.items():
-                    if k.startswith("google") is False and k.startswith("assistant") is False and q in k:
-                        # if user pasted generic blocks
-                        google_urls = []
-                        break
+    for q in queries:
+        google_urls, assistant_urls = [], []
+        for k, urls in mapping.items():
+            if k.startswith("google") and q in k:
+                google_urls = urls
+            if k.startswith("assistant") and q in k:
+                assistant_urls = urls
 
-            google_set = set(google_urls)
-            assistant_set = list(assistant_urls)  # preserve repeats
-            assistant_set_set = set(assistant_set)
+        google_set = set(google_urls)
+        assistant_set = assistant_urls
+        assistant_unique = [u for u in assistant_set if extract_domain(u) not in {extract_domain(x) for x in google_urls}]
+        I = len(google_set & set(assistant_set))
+        N = len(assistant_unique)
 
-            # Intersection count: count distinct URLs in both lists
-            I = len(google_set & assistant_set_set)
-            # Unique assistant citations: total assistant citations minus those that also appear in Google (counts repeats)
-            N = sum(1 for u in assistant_set if extract_domain(u) not in {extract_domain(x) for x in google_urls})
-            # SVR uses Google top 10 baseline
-            SVR = I / 10 if google_urls else 0
-            UAVR = N / len(assistant_set) if assistant_set else 0
+        SVR = I / 10 if google_urls else 0
+        UAVR = N / len(assistant_set) if assistant_set else 0
 
-            # count domains by appearance in assistant citations (count repeats)
-            for url in assistant_set:
-                domain = extract_domain(url)
-                domain_counter[domain] += 1
+        for url in assistant_set:
+            domain_counter[extract_domain(url)] += 1
 
-            results.append({
-                "Query": q,
-                "Google Results": len(google_urls),
-                "Assistant Citations": len(assistant_set),
-                "Shared (I)": I,
-                "Unique (N)": N,
-                "SVR": round(SVR, 3),
-                "UAVR": round(UAVR, 3)
-            })
+        results.append({
+            "Query": q,
+            "Google Results": len(google_urls),
+            "Assistant Citations": len(assistant_set),
+            "Shared (I)": I,
+            "Unique (N)": N,
+            "SVR": round(SVR, 2),
+            "UAVR": round(UAVR, 2)
+        })
 
-        df = pd.DataFrame(results)
+    df = pd.DataFrame(results)
+    avg_svr = round(df["SVR"].mean(), 2) if not df.empty else 0
+    avg_uavr = round(df["UAVR"].mean(), 2) if not df.empty else 0
+    brand_mentions = domain_counter.get(brand_domain.lower().strip(), 0)
 
-        # Build simple client narrative
-        report_text = build_client_report_text(queries, df, domain_counter, brand_domain.lower().strip())
+    # ---------- Executive Summary ----------
+    st.markdown("## 🧭 Executive Summary")
+    status, interp, novelty, action, brand_text = summarize_results(avg_svr, avg_uavr, brand_mentions)
 
-        # Clean, single-screen Executive Summary box
-        st.header("Executive summary (one screen)")
-        avg_svr = round(df["SVR"].mean(), 2) if not df.empty else 0
-        avg_uavr = round(df["UAVR"].mean(), 2) if not df.empty else 0
-        brand_mentions = domain_counter.get(brand_domain.lower().strip(), 0) if brand_domain else 0
-        status, immediate, novelty, brand_text = one_line_action(avg_svr, avg_uavr, brand_mentions)
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.subheader(status)
+        st.write(f"**Average SVR:** {avg_svr}")
+        st.write(f"**Average UAVR:** {avg_uavr}")
+        st.write(f"**Interpretation:** {interp}")
+        st.write(f"**Assistant Behavior:** {novelty}")
+        st.write(f"**Recommendation:** {action}")
+        st.write(f"**Brand Insight:** {brand_text}")
 
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            st.subheader(status)
-            st.write(f"Average SVR (overlap): {avg_svr}  — fraction of Google top-10 that also appears in AI citations.")
-            st.write(f"Average UAVR (assistant-unique share): {avg_uavr}  — fraction of assistant citations not present in Google top-10.")
-            st.write(f"Assistant behavior summary: {novelty}")
-            st.write(f"Primary recommendation: {immediate}")
-            st.write(brand_text)
-        with col2:
-            st.markdown("Top cited domains (assistant)")
-            top_domains_df = pd.DataFrame(domain_counter.most_common(8), columns=["Domain", "Citations"])
-            st.table(top_domains_df)
+    with col2:
+        top_domains = pd.DataFrame(domain_counter.most_common(8), columns=["Domain", "Citations"])
+        st.markdown("### 🔝 Top AI-Cited Domains")
+        st.table(top_domains)
 
-        st.markdown("---")
-        st.header("Actionable item list (prioritized)")
-        # Priority generation: low SVR queries first
-        df_sorted = df.sort_values("SVR")
-        for _, r in df_sorted.iterrows():
-            q = r["Query"]
-            svr = r["SVR"]
-            uavr = r["UAVR"]
-            if svr < 0.3:
-                priority = "High priority — Fix now"
-                actions = [
-                    "Write a concise explainer (200-300 words) with a clear heading containing the query.",
-                    "Add FAQ schema: 3–5 Q&A pairs that answer common sub-questions.",
-                    "Add citations and a canonical PDF for permanence."
-                ]
-            elif svr < 0.6:
-                priority = "Medium priority — Improve"
-                actions = [
-                    "Add a short claim + evidence block near the top (bullet list).",
-                    "Add schema (FAQ or HowTo) where appropriate.",
-                    "Improve heading clarity and internal links to authority pages."
-                ]
-            else:
-                priority = "Low priority — Maintain"
-                actions = [
-                    "Keep current structure and monitor for changes.",
-                    "Ensure timestamps and author fields are stable."
-                ]
-            st.markdown(f"**{q}** — {priority} — SVR={svr}, UAVR={uavr}")
-            for a in actions:
-                st.markdown(f"- {a}")
+    # ---------- Visual Chart ----------
+    st.markdown("## 📊 SVR (Shared Visibility Rate) per Query")
+    fig, ax = plt.subplots(figsize=(8, max(2, len(df) * 0.6)))
+    ax.barh(df["Query"], df["SVR"], color="#4f7bd8")
+    ax.set_xlim(0, 1)
+    ax.set_xlabel("SVR (0–1 scale)")
+    for i, val in enumerate(df["SVR"]):
+        ax.text(val + 0.02 if val < 0.95 else val - 0.06, i, str(val), va="center", fontsize=9)
+    plt.tight_layout()
+    st.pyplot(fig)
 
-        st.markdown("---")
-        st.header("Per-query table (raw metrics)")
-        st.dataframe(df, use_container_width=True)
-        st.markdown(make_csv_download(df, "visibility_metrics.csv"), unsafe_allow_html=True)
+    # ---------- Tables ----------
+    st.markdown("## 📋 Per-Query Breakdown")
+    st.dataframe(df, use_container_width=True)
+    st.markdown(make_csv_download(df, "visibility_report.csv"), unsafe_allow_html=True)
 
-        st.markdown("---")
-        st.header("Downloadable one-page client report (plain text)")
-        st.markdown(make_text_download(report_text, "client_report.txt"), unsafe_allow_html=True)
+    st.markdown("## 🌐 Domain Repeat Citations (RCC)")
+    rcc_df = pd.DataFrame(domain_counter.items(), columns=["Domain", "Citations"])
+    rcc_df["RCC"] = rcc_df["Citations"]
+    st.dataframe(rcc_df.sort_values("Citations", ascending=False), use_container_width=True)
 
-        st.markdown("---")
-        st.header("SVR chart")
-        # horizontal bar for clarity (handles long labels)
-        fig, ax = plt.subplots(figsize=(8, max(2, len(df) * 0.6)))
-        ax.barh(df["Query"], df["SVR"], color="#4f7bd8")
-        ax.set_xlim(0, 1)
-        ax.set_xlabel("SVR (Shared Visibility Rate, 0-1)")
-        for i, (val, label) in enumerate(zip(df["SVR"], df["Query"])):
-            ax.text(val + 0.02 if val < 0.95 else val - 0.06, i, str(val), va="center", fontsize=9)
-        plt.tight_layout()
-        st.pyplot(fig)
+    # ---------- Narrative Report ----------
+    st.markdown("## 🧾 Client Narrative Report")
+    report_lines = [
+        f"Overall Visibility Status: {status}",
+        f"Average SVR: {avg_svr}",
+        f"Average UAVR: {avg_uavr}",
+        "",
+        f"Interpretation: {interp}",
+        f"Assistant Behavior: {novelty}",
+        f"Recommended Action: {action}",
+        f"Brand Observation: {brand_text}",
+        "",
+        "Priority Actions:",
+        "1. Fix low-SVR queries first with structured, concise content (200–300 words).",
+        "2. Add FAQ, HowTo, or Product schema for all core pages.",
+        "3. Add canonical PDFs for high-trust content.",
+        "4. Standardize author/timestamp metadata.",
+        "5. Track SVR monthly; target >= 0.6 as a strong benchmark."
+    ]
+    report_text = "\n".join(report_lines)
+    st.text_area("Plain Report Summary", report_text, height=220)
+    st.markdown(make_text_download(report_text, "client_report.txt"), unsafe_allow_html=True)
 
-        st.markdown("---")
-        st.header("How to read this report (plain)")
-        st.mark.markdown = st.markdown  # silence linter
-        st.markdown("""
-- SVR is the proportion of Google top results that also appear in AI citations. Aim for average SVR >= 0.6.
-- UAVR is the share of assistant citations that Google did not include. High UAVR (>=0.4) means assistants bring in new sources.
-- Priority actions target low SVR queries first. Producing short, factual explainers and adding schema increases the chance assistants cite your site.
-- Re-run monthly and track SVR trend. Use the downloaded client report to present to stakeholders.
+    # ---------- Explanation Tab ----------
+    st.markdown("---")
+    st.markdown("## 📘 How to Read This Report")
+    st.markdown("""
+**SVR (Shared Visibility Rate)** — The overlap between Google’s Top 10 results and AI assistant citations.
+- **High SVR (≥ 0.6):** Google and AI align well — maintain clarity.
+- **Moderate SVR (0.3–0.59):** AI occasionally cites you — optimize structure and schema.
+- **Low SVR (< 0.3):** AI prefers other domains — rebuild topic clarity and authority.
+
+**UAVR (Unique Assistant Visibility Rate)** — How many assistant citations do not appear in Google Top 10.
+- **High UAVR (> 0.4):** AI is finding unique, niche sources — expand into these gaps.
+- **Low UAVR (< 0.2):** AI is repeating Google’s trust set — stability is good.
+
+**RCC (Repeat Citation Count)** — How many times each domain was cited across all queries.
+High RCC = strong semantic trust. Analyze recurring competitor domains for structural patterns.
+
+**What to do next:**
+1. Prioritize fixing low-SVR queries.
+2. Strengthen schema and structured data.
+3. Keep canonical and timestamp stable.
+4. Publish short, verifiable PDFs for high-trust pages.
+5. Re-run monthly to track visibility alignment trends.
 """)
