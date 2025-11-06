@@ -9,9 +9,9 @@ import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Search vs Assistant Visibility", layout="wide")
 
-# -----------------------------
-# Helpers
-# -----------------------------
+# ---------------------------------------------------------------------
+# Helper Functions
+# ---------------------------------------------------------------------
 def extract_domain(url: str) -> str:
     try:
         parsed = urlparse(url)
@@ -24,7 +24,7 @@ def extract_domain(url: str) -> str:
         return url.lower()
 
 def parse_pasted_input(text: str) -> dict:
-    """Parse pasted input into {query: [urls]} mapping"""
+    """Parses pasted text into {query: [urls]} mapping."""
     mapping = {}
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     i = 0
@@ -59,11 +59,11 @@ def make_download_link(df, name):
     b64 = base64.b64encode(csv.encode()).decode()
     return f'<a href="data:file/csv;base64,{b64}" download="{name}">📥 Download {name}</a>'
 
-# -----------------------------
+# ---------------------------------------------------------------------
 # UI Layout
-# -----------------------------
+# ---------------------------------------------------------------------
 st.title("Search vs Assistant Visibility Analyzer")
-st.caption("Compare how often your content appears in **Google Search** versus **AI Assistants** like ChatGPT Search or Perplexity.")
+st.caption("Compare how often your content appears in **Google Search** vs **AI Assistants** like ChatGPT Search or Perplexity.")
 
 with st.sidebar:
     st.header("Setup")
@@ -73,36 +73,33 @@ with st.sidebar:
 
 st.markdown("""
 ### Step 1. Enter Queries
-Type the search queries you want to analyze.  
-(Each query on a new line)
+Type each search query on a new line.
 """)
 queries_text = st.text_area("Queries", height=120)
 
 st.markdown("""
-### Step 2. Paste Assistant & Google Data  
+### Step 2. Paste Assistant & Google Data
 Format examples:
+how to bake sourdough :: sourdoughguide.com, breadtalk.com, thefreshloaf.com
+google::how to bake sourdough :: thefreshloaf.com, kingarthurflour.com, seriouseats.com
 
-how to bake sourdough :: https://sourdoughguide.com, https://breadtalk.com, https://thefreshloaf.com
-
-google::how to bake sourdough :: https://thefreshloaf.com, https://kingarthurflour.com, https://seriouseats.com
-
-The **lines starting with `google::`** are recognized as your Google Top-10 results.  
-The regular lines are your assistant citations.
+Lines starting with `google::` are treated as **Google Top-10** results.  
+Regular lines are **Assistant Citations**.
 """)
 
 assistant_input = st.text_area("Paste combined data here", height=250)
 
+# ---------------------------------------------------------------------
+# Main Logic
+# ---------------------------------------------------------------------
 if st.button("Run Analysis"):
-    # -----------------------------
-    # Process Inputs
-    # -----------------------------
     queries = [q.strip().lower() for q in queries_text.splitlines() if q.strip()]
     mapping = parse_pasted_input(assistant_input)
 
     results, domain_counter = [], Counter()
 
     for q in queries:
-        # Get Google URLs
+        # --- Flexible Google Top-10 lookup ---
         google_urls = []
         if mode == "Auto Google (SerpAPI)" and serpapi_key:
             try:
@@ -110,10 +107,11 @@ if st.button("Run Analysis"):
             except Exception as e:
                 st.error(f"Error fetching Google results for '{q}': {e}")
         else:
-            # Flexible google key matching
-            for key in mapping.keys():
-                if key.startswith("google") and q in key:
-                    google_urls = mapping[key]
+            q_norm = q.replace(" ", "").lower()
+            for key, urls in mapping.items():
+                k = key.lower().replace(" ", "")
+                if k.startswith("google") and (q_norm in k or k.endswith(q_norm)):
+                    google_urls = urls
                     break
 
         # Assistant URLs
@@ -145,13 +143,10 @@ if st.button("Run Analysis"):
 
     results_df = pd.DataFrame(results)
 
-    # -----------------------------
-    # Output
-    # -----------------------------
+    # ---------------- Output ----------------
     st.success("✅ Analysis complete.")
     st.markdown("### Per-Query Metrics")
     st.dataframe(results_df, use_container_width=True)
-
     st.markdown(make_download_link(results_df, "visibility_report.csv"), unsafe_allow_html=True)
 
     if show_domains:
@@ -163,37 +158,32 @@ if st.button("Run Analysis"):
         ]).sort_values("RCC", ascending=False)
         st.dataframe(rcc_df, use_container_width=True)
 
-    # -----------------------------
-    # Explanations
-    # -----------------------------
     st.markdown("---")
-    st.markdown("## Results Interpretation")
+    st.markdown("## How to Read the Results")
     st.markdown("""
-- **Shared (I)** — How many URLs appear in both Google and the assistant.  
-- **Unique (N)** — URLs that the assistant used but Google didn’t rank in its Top-10.  
-- **SVR (Shared Visibility Rate)** = I ÷ 10 → how much of Google’s Top-10 also appears in the assistant’s citations.  
-- **UAVR (Unique Assistant Visibility Rate)** = N ÷ assistant total → how much new content the assistant introduces.  
-- **RCC (Repeat Citation Count)** — how consistently a domain is cited across queries.
+**Shared (I):** URLs appearing in both Google and assistant results.  
+**Unique (N):** URLs the assistant uses that Google didn’t rank.  
+**SVR (Shared Visibility Rate):** I ÷ 10 → overlap of Google’s Top-10 with assistant citations.  
+**UAVR (Unique Assistant Visibility Rate):** N ÷ assistant citations → how much new material the assistant adds.  
+**RCC (Repeat Citation Count):** How often a domain is repeatedly cited across queries.
 
-**Interpretation Guide**
 | Pattern | Meaning |
 |----------|----------|
-| SVR ≥ 0.6 | Strong overlap — assistants and Google agree your content is trusted. |
-| 0.3 ≤ SVR < 0.6 | Partial overlap — improve clarity, markup, internal linking. |
-| SVR < 0.3 with high UAVR | Assistants prefer other sources — refine structure or authority. |
-| High RCC for competitor domains | They have semantic trust — analyze their schema or content framing. |
+| SVR ≥ 0.6 | Strong overlap — assistants and Google trust the same sources. |
+| 0.3 ≤ SVR < 0.6 | Moderate overlap — improve clarity, linking, or schema. |
+| SVR < 0.3 with high UAVR | Assistant prefers other sources — review authority and structure. |
+| High RCC for competitors | Indicates strong semantic trust — analyze their design or markup. |
 """)
 
-    # -----------------------------
-    # Chart Visualization
-    # -----------------------------
-    st.markdown("### SVR Distribution")
+    st.markdown("### SVR Overview")
     fig, ax = plt.subplots()
-    ax.bar(results_df["Query"], results_df["SVR"], color="skyblue")
+    ax.bar(results_df["Query"], results_df["SVR"], color="cornflowerblue")
     ax.set_ylabel("SVR (Shared Visibility Rate)")
     ax.set_xlabel("Query")
     ax.set_ylim(0, 1)
+    for i, v in enumerate(results_df["SVR"]):
+        ax.text(i, v + 0.02, str(v), ha='center')
     st.pyplot(fig)
 
 else:
-    st.info("Enter your queries and data above, then click **Run Analysis**.")
+    st.info("Enter your queries and paste data above, then click **Run Analysis**.")
